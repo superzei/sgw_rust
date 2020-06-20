@@ -1,12 +1,9 @@
 use std::net;
 use std::env;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::mpsc;
 use std::thread;
 
 use crate::gtp_v1::GtpV1;
-use std::borrow::Borrow;
-
 mod gtp_v1;
 
 /// UDP receiver thread
@@ -14,7 +11,7 @@ mod gtp_v1;
 fn receiver_thread(address: SocketAddr, callback: &dyn Fn(&[u8], &UdpSocket) -> (), send_address: SocketAddr) {
     let receiver_socket = net::UdpSocket::bind(address).expect("Unable to open udp receive socket!");
     let sender_socket = net::UdpSocket::bind("0.0.0.0:0").expect("Unable to open sender socket");
-    sender_socket.connect(send_address);
+    sender_socket.connect(send_address).unwrap();
 
     println!("Thread started!");
 
@@ -23,7 +20,7 @@ fn receiver_thread(address: SocketAddr, callback: &dyn Fn(&[u8], &UdpSocket) -> 
         let mut buf = [0; 2000];
         let (amt, _src) = match receiver_socket.recv_from(&mut buf) {
             Ok(res) => {res},
-            Err(e) => {continue}
+            Err(_e) => {continue}
         };
 
         let buf = &mut buf[..amt];
@@ -35,12 +32,12 @@ fn receiver_thread(address: SocketAddr, callback: &dyn Fn(&[u8], &UdpSocket) -> 
 
 fn udp_callback(data: &[u8], socket: &UdpSocket) -> () {
     let mut packet = GtpV1::init(data.to_vec());
-    socket.send(packet.serialize().as_ref());
+    socket.send(packet.serialize().as_ref()).unwrap();
 }
 
 fn gtp_callback(data: &[u8], socket: &UdpSocket) -> () {
-    let mut packet = GtpV1::from_gtp(data);
-    socket.send(packet.get_data());
+    let packet = GtpV1::from_gtp(data);
+    socket.send(packet.get_data()).unwrap();
 }
 
 fn main() -> std::io::Result<()> {
@@ -74,8 +71,8 @@ fn main() -> std::io::Result<()> {
     // start receiver threads
     let udp_thread = thread::spawn(move || receiver_thread(udp_listener_address, &udp_callback, gtp_target));
     let gtp_thread = thread::spawn(move || receiver_thread(gtp_listen_address, &gtp_callback, uplink_udp_send_address));
-    udp_thread.join();
-    gtp_thread.join();
+    udp_thread.join().unwrap();
+    gtp_thread.join().unwrap();
 
     Ok(())
 

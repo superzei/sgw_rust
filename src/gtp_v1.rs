@@ -17,7 +17,7 @@ impl GtpV1 {
 
     pub fn from_gtp(data: &[u8]) -> GtpV1 {
         // split header from data
-        let (header, _data) = data.split_at(8);
+        let (_header, _data) = data.split_at(8);
         let data = _data.to_vec();
 
         let p = GtpV1 {
