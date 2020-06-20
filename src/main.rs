@@ -32,12 +32,18 @@ fn receiver_thread(address: SocketAddr, callback: &dyn Fn(&[u8], &UdpSocket) -> 
 
 fn udp_callback(data: &[u8], socket: &UdpSocket) -> () {
     let mut packet = GtpV1::init(data.to_vec());
-    socket.send(packet.serialize().as_ref()).unwrap();
+    match socket.send(packet.serialize().as_ref()) {
+        Ok(_) => {},
+        Err(e) => {println!("Unable to send, {:?}", e)}
+    }
 }
 
 fn gtp_callback(data: &[u8], socket: &UdpSocket) -> () {
     let packet = GtpV1::from_gtp(data);
-    socket.send(packet.get_data()).unwrap();
+    match socket.send(packet.get_data()) {
+        Ok(_) => {},
+        Err(e) => {println!("Unable to send, {:?}", e)}
+    }
 }
 
 fn main() -> std::io::Result<()> {
