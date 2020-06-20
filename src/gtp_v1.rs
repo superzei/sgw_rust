@@ -16,14 +16,20 @@ impl GtpV1 {
     }
 
     pub fn from_gtp(data: &[u8]) -> GtpV1 {
+        // split header from data
         let (header, _data) = data.split_at(8);
         let data = _data.to_vec();
+
         let p = GtpV1 {
             length: data.len() as u16,
             data
         };
 
         p
+    }
+
+    pub fn get_data(self: &GtpV1) -> &[u8] {
+        self.data.as_ref()
     }
 
     pub fn serialize(self: &mut GtpV1) -> Vec<u8> {

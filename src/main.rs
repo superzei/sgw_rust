@@ -11,8 +11,11 @@ mod gtp_v1;
 
 /// UDP receiver thread
 ///
-fn receiver_thread(address: SocketAddr, callback: &dyn Fn(&[u8], &UdpSocket) -> (), send_socket: &UdpSocket) {
+fn receiver_thread(address: SocketAddr, callback: &dyn Fn(&[u8], &UdpSocket) -> (), send_address: SocketAddr) {
     let receiver_socket = net::UdpSocket::bind(address).expect("Unable to open udp receive socket!");
+    let sender_socket = net::UdpSocket::bind("0.0.0.0:0").expect("Unable to open sender socket");
+    sender_socket.connect(send_address);
+
     println!("Thread started!");
 
     loop {
@@ -26,7 +29,7 @@ fn receiver_thread(address: SocketAddr, callback: &dyn Fn(&[u8], &UdpSocket) -> 
         let buf = &mut buf[..amt];
 
         // send to queue
-        callback(buf, send_socket);
+        callback(buf, &sender_socket);
     }
 }
 
@@ -36,9 +39,8 @@ fn udp_callback(data: &[u8], socket: &UdpSocket) -> () {
 }
 
 fn gtp_callback(data: &[u8], socket: &UdpSocket) -> () {
-    println!("GTP Callback");
     let mut packet = GtpV1::from_gtp(data);
-    socket.send(packet.serialize().as_ref());
+    socket.send(packet.get_data());
 }
 
 fn main() -> std::io::Result<()> {
@@ -69,14 +71,9 @@ fn main() -> std::io::Result<()> {
     println!("{:?}",udp_listener_address);
     println!("{:?}",gtp_listen_address);
 
-    let gtp_sender = net::UdpSocket::bind(gtp_target).expect("Unable to open gtp sender socket!");
-    gtp_sender.connect(gtp_target);
-    let udp_sender= net::UdpSocket::bind(uplink_udp_send_address).expect("Unable to open udp sender socket!");
-    udp_sender.connect(uplink_udp_send_address);
-
     // start receiver threads
-    let udp_thread = thread::spawn(move || receiver_thread(udp_listener_address, &udp_callback, &gtp_sender));
-    let gtp_thread = thread::spawn(move || receiver_thread(gtp_listen_address, &gtp_callback, &udp_sender));
+    let udp_thread = thread::spawn(move || receiver_thread(udp_listener_address, &udp_callback, gtp_target));
+    let gtp_thread = thread::spawn(move || receiver_thread(gtp_listen_address, &gtp_callback, uplink_udp_send_address));
     udp_thread.join();
     gtp_thread.join();
 
