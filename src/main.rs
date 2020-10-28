@@ -8,6 +8,7 @@ use std::panic;
 use std::process;
 use std::fs;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::gtp_v1::GtpV1;
 use std::thread;
@@ -21,8 +22,8 @@ struct UdpReceiverPayload {
 }
 
 struct GtpReceiverPayload {
-    teid_map: HashMap<u32, SenderReceiverPortPair>,
-    receive_address: SocketAddr
+    teid_map: Arc<HashMap<u32, SenderReceiverPortPair>>,
+    receive_socket: net::UdpSocket
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -46,6 +47,7 @@ struct TeidConnectionPair {
 /// Config object
 #[derive(Serialize, Deserialize, Debug)]
 struct ConfigRoot {
+    number_of_gtp_receiver_threads: u8,
     gtp: ReceiverSenderPair,
     tunnels: Vec<TeidConnectionPair>
 }
@@ -66,15 +68,14 @@ fn set_exit_hook() {
 }
 
 fn gtp_receiver_thread(payload: GtpReceiverPayload) {
-    let receiver_socket = net::UdpSocket::bind(payload.receive_address).expect("Unable to bind to udp receive socket!");
     let sender_socket = net::UdpSocket::bind("0.0.0.0:0").expect("Unable to bind to sender socket");
 
-    println!("GTP Receiver thread started for: {}:{}", payload.receive_address.ip(), payload.receive_address.port());
+    println!("GTP Receiver thread started for: {}:{}", payload.receive_socket.local_addr().unwrap().ip(), payload.receive_socket.local_addr().unwrap().port());
     
     loop {
         // receive loop
         let mut buf = [0; 2000];
-        let (amt, _src) = match receiver_socket.recv_from(&mut buf) {
+        let (amt, _src) = match payload.receive_socket.recv_from(&mut buf) {
             Ok(res) => {res},
             Err(_e) => {continue}
         };
@@ -136,8 +137,10 @@ fn main() -> std::io::Result<()> {
 
     let gtp_sender = SocketAddr::new(config.gtp.sender.host.parse::<IpAddr>().unwrap(), config.gtp.sender.port.parse::<u16>().unwrap());
     let gtp_receiver = SocketAddr::new(config.gtp.receiver.host.parse::<IpAddr>().unwrap(), config.gtp.receiver.port.parse::<u16>().unwrap());
+
     let gtp_send_socket = net::UdpSocket::bind("0.0.0.0:0").expect("Unable to bind to sender socket");
     gtp_send_socket.connect(gtp_sender).expect("Unable to connect to GTP sender socket.");
+    let gtp_receive_socket = net::UdpSocket::bind(gtp_receiver).expect("Unable to bind to sender socket");
 
     let mut tunnels: HashMap<u32, SenderReceiverPortPair> = HashMap::new();
     let mut receiver_tunnels: HashMap<u32, SocketAddr> = HashMap::new();
@@ -179,13 +182,18 @@ fn main() -> std::io::Result<()> {
 
 
     // start gtp receiver thread
-    let gtp_thread = thread::spawn(move || gtp_receiver_thread(GtpReceiverPayload{
-        teid_map: tunnels,
-        receive_address: gtp_receiver
-    }));
+    let map_ref = Arc::new(tunnels);
+    let mut receiver_threads: Vec<JoinHandle<_>> = (0..config.number_of_gtp_receiver_threads).map(|_index| {
+        let new_socket = gtp_receive_socket.try_clone().unwrap();
+        let new_mut = map_ref.clone();
+        thread::spawn(|| gtp_receiver_thread(GtpReceiverPayload{
+            teid_map: new_mut,
+            receive_socket: new_socket
+        }))
+    }).collect();
 
     // start udp receiver threads
-    let threads: Vec<JoinHandle<_>> = receiver_tunnels.iter().map(|(&teid, &addr)| {
+    let mut threads: Vec<JoinHandle<_>> = receiver_tunnels.iter().map(|(&teid, &addr)| {
         let new_socket = gtp_send_socket.try_clone().unwrap();
         thread::spawn(move || udp_receiver_thread(UdpReceiverPayload{
             teid: teid.to_owned(),
@@ -194,8 +202,17 @@ fn main() -> std::io::Result<()> {
         }))
     }).collect();
 
-    // join everything
-    gtp_thread.join().unwrap();
+    // wait receiver threads
+    for _ in 0..receiver_threads.len() {
+        let handle = receiver_threads.pop().unwrap();
+        handle.join().expect("Unable to join gtp receiver thread");
+    }
+
+    // wait udp threads
+    for _ in 0..threads.len() {
+        let handle = threads.pop().unwrap();
+        handle.join().expect("Unable to join udp receiver thread.");
+    }
 
     Ok(())
 

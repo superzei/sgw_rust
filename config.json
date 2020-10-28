@@ -1,4 +1,5 @@
 {
+    "number_of_gtp_receiver_threads": 3,
     "gtp": {
         "receiver": {"host": "127.0.0.2", "port": "2152"},
         "sender": {"host": "127.0.0.1", "port": "2154"}
@@ -9,6 +10,13 @@
             "connection": {
                 "sender": {"host": "10.10.200.139", "port": "8891"},
                 "receiver": {"host": "127.0.0.1", "port": "8892"}
+            }
+        },
+        {
+            "teid": 2,
+            "connection": {
+                "sender": {"host": "10.10.200.139", "port": "8893"},
+                "receiver": {"host": "127.0.0.1", "port": "8894"}
             }
         },
         {
